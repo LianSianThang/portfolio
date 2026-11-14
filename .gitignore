@@ -13,3 +13,7 @@
 node_modules/
 *.log
 test-results/
+
+# Temporary file-transfer helpers and signed transfer requests
+tmp-transfer/
+portrait-import/
