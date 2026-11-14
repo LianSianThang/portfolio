@@ -1,0 +1,15 @@
+# Local agent instructions and assistant configuration must stay off GitHub.
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]
+**/[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+**/[Cc][Ll][Aa][Uu][Dd][Ee].[Mm][Dd]
+.agents/
+.codex/
+.claude/
+.cursor/
+.env*
+!.env.example
+.vercel/
+node_modules/
+*.log
+test-results/
