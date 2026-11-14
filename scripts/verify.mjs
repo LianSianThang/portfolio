@@ -1,0 +1,30 @@
+import { writeFileSync, mkdirSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const targets=await fetch('http://127.0.0.1:9222/json').then(r=>r.json());
+const target=targets.find(x=>x.type==='page');
+const socket=new WebSocket(target.webSocketDebuggerUrl);
+await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject});
+let next=0;const pending=new Map();const errors=[];
+socket.onmessage=event=>{const message=JSON.parse(event.data);if(message.id){const item=pending.get(message.id);pending.delete(message.id);message.error?item.reject(message.error):item.resolve(message.result);}if(message.method==='Runtime.exceptionThrown')errors.push(message.params.exceptionDetails.text);};
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++next;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
+const evaluate=async expression=>{const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw new Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
+await call('Runtime.enable');await call('Page.enable');
+await call('Page.navigate',{url:'http://127.0.0.1:8080'});
+for(let i=0;i<50;i++){if(await evaluate("document.querySelectorAll('.project-card').length===23"))break;await new Promise(r=>setTimeout(r,100));}
+assert.equal(await evaluate("document.querySelectorAll('.project-card').length"),23);
+const filterResults=await evaluate(`(()=>{const results=[];for(const button of document.querySelectorAll('#filters button')){button.click();results.push([button.textContent,document.querySelectorAll('.project-card').length,button.getAttribute('aria-pressed')]);}document.querySelector('#filters button').click();return results;})()`);
+assert.deepEqual(filterResults.map(x=>x[1]),[23,4,2,7,7,3]);assert.ok(filterResults.every(x=>x[2]==='true'));
+assert.equal(await evaluate(`(()=>{const original=projects.length;projects.push({title:'Temporary test',description:'Test',category:'Web apps',technologies:['HTML'],url:'https://github.com/LianSianThang/test',visual:'test',preview:['test','test','test']});renderProjects();const count=document.querySelectorAll('.project-card').length;projects.pop();renderProjects();return count===original+1&&document.querySelectorAll('.project-card').length===original;})()`),true);
+assert.equal(await evaluate(`(()=>{document.querySelector('#contact-form').requestSubmit();return document.activeElement.id;})()`),'name');
+assert.equal(await evaluate(`(()=>{nameField: {const field=document.querySelector('#name');field.value='L';}document.querySelector('#email').value='invalid';document.querySelector('#message').value='short';document.querySelector('#contact-form').requestSubmit();return document.querySelectorAll('[aria-invalid="true"]').length;})()`),3);
+assert.equal(await evaluate(`(()=>{document.querySelector('#name').value='Lian';document.querySelector('#email').value='lian@example.com';document.querySelector('#message').value='  Hello, I would like to talk about a project.  ';for(const id of ['name','email','message'])document.getElementById(id).dispatchEvent(new Event('input'));document.querySelector('#contact-form').requestSubmit();return document.querySelector('#form-status').textContent;})()`),'Demo only. Your message has not been sent.');
+assert.equal(await evaluate("document.querySelectorAll('[aria-invalid=\"true\"]').length"),0);
+assert.equal(await evaluate(`(()=>{document.querySelector('#message').value='x'.repeat(501);document.querySelector('#contact-form').requestSubmit();return document.activeElement.id;})()`),'message');
+for(const theme of ['dark','light']){await evaluate(`setTheme('${theme}');localStorage.setItem('portfolio-theme','${theme}')`);await call('Page.reload');for(let i=0;i<50;i++){if(await evaluate(`document.querySelectorAll('.project-card').length===23&&document.documentElement.dataset.theme==='${theme}'`))break;await new Promise(r=>setTimeout(r,50));}assert.equal(await evaluate('document.documentElement.dataset.theme'),theme);}
+assert.equal(await evaluate(`(()=>{const original=Storage.prototype.setItem;Storage.prototype.setItem=()=>{throw Error('blocked')};try{document.querySelector('#theme-toggle').click();return document.documentElement.dataset.theme==='dark';}finally{Storage.prototype.setItem=original;setTheme('light');}})()`),true);
+mkdirSync('screenshots',{recursive:true});
+for(const width of [360,768,1280]){await call('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===360});await evaluate('window.scrollTo(0,0)');assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth'),true,`Overflow at ${width}`);if(width===360){assert.equal(await evaluate("getComputedStyle(document.querySelector('#navigation')).display"),'none');await evaluate("document.querySelector('#menu-toggle').click()");assert.equal(await evaluate("document.querySelector('#menu-toggle').getAttribute('aria-expanded')"),'true');await evaluate("document.querySelector('#navigation a').click()");assert.equal(await evaluate("document.querySelector('#menu-toggle').getAttribute('aria-expanded')"),'false');await evaluate('window.scrollTo(0,0)');}for(const theme of ['light','dark']){await evaluate(`setTheme('${theme}')`);if(width!==768){const screenshot=await call('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});writeFileSync(`screenshots/${width===360?'mobile':'desktop'}-${theme}.png`,Buffer.from(screenshot.data,'base64'));}}}
+assert.equal(await evaluate("Array.from(document.images).every(img=>img.hidden||(img.complete&&img.naturalWidth>0))"),true);
+const anchors=await evaluate("Array.from(document.querySelectorAll('a[href^=\"#\"]')).every(a=>document.getElementById(a.hash.slice(1)))");assert.ok(anchors);
+assert.deepEqual(errors,[]);await evaluate("setTheme('light');localStorage.setItem('portfolio-theme','light')");
+console.log(JSON.stringify({passed:true,projects:23,filters:filterResults,widths:[360,768,1280],themes:['light','dark'],screenshots:4,consoleErrors:errors},null,2));socket.close();
